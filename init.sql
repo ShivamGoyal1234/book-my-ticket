@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS seats (
 );
 
 INSERT INTO seats (isbooked)
-SELECT 0 FROM generate_series(1, 20)
+SELECT 0 FROM generate_series(1, 120)
 WHERE NOT EXISTS (SELECT 1 FROM seats LIMIT 1);
 
 CREATE TABLE IF NOT EXISTS users (
