@@ -1,12 +1,16 @@
 // ─── Database Schema ────────────────────────────────────────────────────────
 //
 //  CREATE TABLE seats (
-//      id SERIAL PRIMARY KEY,
-//      name VARCHAR(255),
-//      isbooked INT DEFAULT 0
+//      id          SERIAL PRIMARY KEY,
+//      movie_id    INT NOT NULL DEFAULT 1,
+//      seat_number INT NOT NULL,
+//      name        VARCHAR(255),
+//      isbooked    INT DEFAULT 0
 //  );
-//  INSERT INTO seats (isbooked)
-//  SELECT 0 FROM generate_series(1, 20);
+//  INSERT INTO seats (movie_id, seat_number, isbooked)
+//  SELECT m.id, s.n, 0
+//  FROM generate_series(1, 3) AS m(id)
+//  CROSS JOIN generate_series(1, 120) AS s(n);
 //
 //  CREATE TABLE users (
 //      id                  SERIAL PRIMARY KEY,
@@ -25,13 +29,25 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
+import nodemailer from "nodemailer";
 import { MOVIES } from "./mockData.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const port = process.env.PORT || 8080;
 const JWT_SECRET = process.env.JWT_SECRET;
+
+const mailer = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: parseInt(process.env.SMTP_PORT) === 465,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+const SMTP_FROM = process.env.SMTP_FROM || process.env.SMTP_USER;
 
 const pool = new pg.Pool({
   host: process.env.DB_HOST,
@@ -78,7 +94,14 @@ app.get("/movies", (req, res) => {
 
 app.get("/seats", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM seats");
+    const movieId = parseInt(req.query.movieId);
+    if (!movieId) {
+      return res.status(400).json({ error: "movieId query param is required." });
+    }
+    const result = await pool.query(
+      "SELECT * FROM seats WHERE movie_id = $1 ORDER BY seat_number",
+      [movieId]
+    );
     res.send(result.rows);
   } catch (ex) {
     console.error(ex);
@@ -185,26 +208,50 @@ app.post("/forgot-password", async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      return res.json({
-        message: "If an account with that email exists, a reset link has been sent.",
-      });
+      return res.json({ message: "If an account with that email exists, an OTP has been sent." });
     }
 
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // expires in 1 hour
+    const user = result.rows[0];
+    const otp = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit OTP
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // expires in 10 minutes
 
     await pool.query(
       "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
-      [resetToken, expiresAt, email.toLowerCase()]
+      [otp, expiresAt, email.toLowerCase()]
     );
 
-    res.json({
-      message: "If an account with that email exists, a reset link has been sent.",
-      demo_token: resetToken,
+    await mailer.sendMail({
+      from: `"ChaiCode Cinema" <${SMTP_FROM}>`,
+      to: email,
+      subject: "Your Password Reset OTP — ChaiCode Cinema",
+      html: `
+        <div style="font-family:'Outfit',Arial,sans-serif;background:#0f172a;padding:40px 0;min-height:100vh">
+          <div style="max-width:480px;margin:0 auto;background:#1e293b;border-radius:20px;padding:40px;border:1px solid #334155">
+            <div style="text-align:center;margin-bottom:32px">
+              <div style="display:inline-block;background:linear-gradient(135deg,#10b981,#06b6d4);border-radius:16px;padding:14px;font-size:28px;margin-bottom:16px">🎬</div>
+              <h1 style="color:#f8fafc;font-size:22px;margin:0 0 6px">ChaiCode Cinema</h1>
+              <p style="color:#64748b;font-size:14px;margin:0">Password Reset Request</p>
+            </div>
+            <p style="color:#cbd5e1;font-size:15px;margin:0 0 8px">Hi <strong>${user.name}</strong>,</p>
+            <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 28px">
+              Use the OTP below to reset your password. It expires in <strong style="color:#f8fafc">10 minutes</strong>.
+            </p>
+            <div style="background:#0f172a;border:2px solid #10b981;border-radius:14px;padding:24px;text-align:center;margin-bottom:28px">
+              <p style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px">Your OTP</p>
+              <span style="color:#10b981;font-size:42px;font-weight:800;letter-spacing:10px">${otp}</span>
+            </div>
+            <p style="color:#475569;font-size:12px;text-align:center;margin:0">
+              If you didn't request this, you can safely ignore this email.
+            </p>
+          </div>
+        </div>
+      `,
     });
+
+    res.json({ message: "If an account with that email exists, an OTP has been sent." });
   } catch (ex) {
     console.error(ex);
-    res.status(500).json({ error: "Failed to process request. Please try again." });
+    res.status(500).json({ error: "Failed to send OTP. Please try again." });
   }
 });
 
@@ -261,7 +308,7 @@ app.get("/me", authMiddleware, async (req, res) => {
 app.get("/my-bookings", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM seats WHERE name = $1 AND isbooked = 1 ORDER BY id",
+      "SELECT * FROM seats WHERE name = $1 AND isbooked = 1 ORDER BY movie_id, seat_number",
       [req.user.name]
     );
     res.json(result.rows);

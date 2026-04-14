@@ -306,16 +306,12 @@
               <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-5 mb-4">
                 <div class="flex items-center gap-2 mb-3">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-.85a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                  <span class="text-emerald-400 font-semibold text-sm">Reset link sent!</span>
+                  <span class="text-emerald-400 font-semibold text-sm">OTP sent!</span>
                 </div>
-                <p class="text-slate-300 text-xs leading-relaxed">Check your inbox. For this demo, your reset token is shown below. Click it to copy.</p>
+                <p class="text-slate-300 text-xs leading-relaxed">A 6-digit OTP has been sent to your email. It expires in <strong class="text-white">10 minutes</strong>.</p>
               </div>
-              <div>
-                <p class="text-slate-500 text-xs mb-2 font-medium uppercase tracking-wide">Demo Reset Token (click to copy)</p>
-                <div id="demo-token-display" class="token-box" onclick="copyToken()"></div>
-              </div>
-              <button onclick="switchAuthView('reset')" class="btn-primary mt-4">
-                Reset My Password
+              <button onclick="switchAuthView('reset')" class="btn-primary mt-2">
+                Enter OTP &amp; Reset Password
               </button>
             </div>
           </div>
@@ -327,13 +323,13 @@
             </button>
             <div class="mb-6">
               <h2 class="text-xl font-bold text-white mb-1">Reset your password</h2>
-              <p class="text-slate-400 text-sm">Paste your reset token and choose a new password.</p>
+              <p class="text-slate-400 text-sm">Enter the 6-digit OTP sent to your email.</p>
             </div>
             <form onsubmit="handleResetPassword(event)">
               <div class="space-y-4">
                 <div>
-                  <label class="block text-slate-300 text-sm font-medium mb-2">Reset Token</label>
-                  <input id="reset-token" type="text" placeholder="Paste your reset token" class="input-field" style="font-family: 'Courier New', monospace; font-size: 12px;" required />
+                  <label class="block text-slate-300 text-sm font-medium mb-2">OTP Code</label>
+                  <input id="reset-token" type="text" placeholder="• • • • • •" class="input-field" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" style="letter-spacing:8px;font-size:22px;font-weight:700;text-align:center;" required />
                 </div>
                 <div>
                   <label class="block text-slate-300 text-sm font-medium mb-2">New Password</label>
@@ -468,9 +464,9 @@
     <script>
       let currentUser     = null;
       let seats           = [];
+      let movies          = [];
       let selectedMovieId = null;
       let pendingBookingSeatId = null;
-      let lastResetToken  = "";
 
       window.addEventListener("DOMContentLoaded", () => {
         const token = localStorage.getItem("token");
@@ -487,7 +483,6 @@
         document.getElementById("nav-name").textContent  = currentUser.name;
         document.getElementById("nav-email").textContent = currentUser.email;
         loadMovies();
-        loadSeats();
         loadMyBookings();
       }
 
@@ -608,10 +603,6 @@
           document.getElementById("forgot-success").classList.remove("hidden");
           btn.closest("form").classList.add("hidden");
 
-          if (data.demo_token) {
-            lastResetToken = data.demo_token;
-            document.getElementById("demo-token-display").textContent = data.demo_token;
-          }
         } catch {
           showFormError(errEl, "Network error. Please try again.");
         } finally {
@@ -679,7 +670,7 @@
 
       async function loadMovies() {
         try {
-          const movies = await fetch("/movies").then(r => r.json());
+          movies = await fetch("/movies").then(r => r.json());
           renderMovies(movies);
         } catch (ex) {
           console.error("Failed to load movies", ex);
@@ -690,7 +681,7 @@
         const grid = document.getElementById("movies-grid");
         const genreColors = { Action: "text-orange-400", Drama: "text-blue-400", Thriller: "text-purple-400" };
         grid.innerHTML = movies.map(m => `
-          <div class="movie-card" id="movie-${m.id}" onclick="selectMovie(${m.id}, '${escHtml(m.title)}')">
+          <div class="movie-card" id="movie-${m.id}" onclick="selectMovie(${m.id})">
             <div class="flex items-start justify-between mb-3">
               <span class="text-2xl">${movieEmoji(m.genre)}</span>
               <span class="text-xs font-semibold px-2 py-0.5 rounded-lg bg-slate-700 text-slate-300">${escHtml(m.rating)}</span>
@@ -706,24 +697,21 @@
         return { Action: "💥", Drama: "☕", Thriller: "🔐" }[genre] || "🎬";
       }
 
-      function selectMovie(id, title) {
+      function selectMovie(id) {
         selectedMovieId = id;
         document.querySelectorAll(".movie-card").forEach(c => c.classList.remove("selected"));
         document.getElementById("movie-" + id).classList.add("selected");
         document.getElementById("booking-section").classList.remove("hidden");
-        renderSeatGrid(title);
+        loadSeats();
         document.getElementById("booking-section").scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
       async function loadSeats() {
+        if (!selectedMovieId) return;
         try {
-          seats = await fetch("/seats").then(r => r.json());
-          if (selectedMovieId) {
-            const card  = document.getElementById("movie-" + selectedMovieId);
-            const title = card ? card.querySelector("h3").textContent : "";
-            renderSeatGrid(title);
-          }
-          updateStats();
+          seats = await fetch("/seats?movieId=" + selectedMovieId).then(r => r.json());
+          const movie = movies.find(m => m.id === selectedMovieId);
+          renderSeatGrid(movie ? movie.title : "");
         } catch (ex) {
           console.error("Failed to load seats", ex);
         }
@@ -752,7 +740,7 @@
             ? `<span class="tooltip">${isYours ? "Booked by you" : "Booked by " + escHtml(seat.name || "?")}</span>`
             : "";
           const onclick = seat.isbooked ? "" : `onclick="openModal(${seat.id}, '${escHtml(movieTitle)}')"`;
-          return `<div class="${cls}" ${onclick}>${tooltip}${seat.id}</div>`;
+          return `<div class="${cls}" ${onclick}>${tooltip}${seat.seat_number}</div>`;
         }).join("");
 
         updateStats();
@@ -779,9 +767,11 @@
           const bar  = document.getElementById("my-bookings-bar");
           if (data.length === 0) { bar.classList.add("hidden"); return; }
           bar.classList.remove("hidden");
-          document.getElementById("my-bookings-list").innerHTML = data.map(s =>
-            `<span class="bg-cyan-900/40 border border-cyan-500/30 text-cyan-300 text-xs font-semibold px-3 py-1.5 rounded-lg">Seat ${s.id}</span>`
-          ).join("");
+          document.getElementById("my-bookings-list").innerHTML = data.map(s => {
+            const movie = movies.find(m => m.id === s.movie_id);
+            const movieName = movie ? movie.title : `Movie ${s.movie_id}`;
+            return `<span class="bg-cyan-900/40 border border-cyan-500/30 text-cyan-300 text-xs font-semibold px-3 py-1.5 rounded-lg">${escHtml(movieName)} · Seat ${s.seat_number}</span>`;
+          }).join("");
         } catch (ex) {
           console.error("Failed to load my bookings", ex);
         }
@@ -825,16 +815,6 @@
         } finally {
           setLoading(btn, false, "Confirm");
         }
-      }
-
-      function copyToken() {
-        if (!lastResetToken) return;
-        navigator.clipboard.writeText(lastResetToken).then(() => {
-          document.getElementById("reset-token").value = lastResetToken;
-          showToast("Token copied to clipboard!", "info");
-        }).catch(() => {
-          document.getElementById("reset-token").value = lastResetToken;
-        });
       }
 
       function setLoading(btn, loading, loadingText) {
