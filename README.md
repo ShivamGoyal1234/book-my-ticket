@@ -55,6 +55,9 @@ Create a `.env` file in the project root:
 ```env
 PORT=8080
 JWT_SECRET=replace-with-a-strong-secret
+REFRESH_TOKEN_SECRET=replace-with-a-strong-refresh-secret
+PASSWORD_RESET_SECRET=replace-with-a-strong-password-reset-secret
+JWT_ACCESS_EXPIRES_IN=15m
 
 DB_HOST=localhost
 DB_PORT=5432
@@ -97,7 +100,7 @@ If you run through Docker Compose, use:
 
 ## Run with Docker Compose
 
-1. Create `.env` with the required values (`DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, SMTP values).
+1. Create `.env` with the required values (`DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `REFRESH_TOKEN_SECRET`, `PASSWORD_RESET_SECRET`, `JWT_ACCESS_EXPIRES_IN`, SMTP values).
 2. Start services:
 
    ```bash

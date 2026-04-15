@@ -29,6 +29,7 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { MOVIES } from "./mockData.js";
 
@@ -36,6 +37,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const port = process.env.PORT || 8080;
 const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || "7d";
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || JWT_SECRET;
+const PASSWORD_RESET_SECRET = process.env.PASSWORD_RESET_SECRET || JWT_SECRET;
+
+const signAccessToken = (user) =>
+  jwt.sign(
+    { id: user.id, email: user.email, name: user.name },
+    JWT_SECRET,
+    { expiresIn: JWT_ACCESS_EXPIRES_IN }
+  );
+
+const signRefreshToken = (user) =>
+  jwt.sign(
+    { id: user.id, email: user.email },
+    REFRESH_TOKEN_SECRET,
+    { expiresIn: "30d" }
+  );
+
+const hashResetToken = (token) =>
+  crypto
+    .createHmac("sha256", PASSWORD_RESET_SECRET)
+    .update(token)
+    .digest("hex");
 
 const mailer = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -138,15 +162,13 @@ app.post("/register", async (req, res) => {
     );
 
     const user = result.rows[0];
-    const token = jwt.sign(
-      { id: user.id, email: user.email, name: user.name },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = signAccessToken(user);
+    const refreshToken = signRefreshToken(user);
 
     res.status(201).json({
       message: "Registration successful!",
       token,
+      refreshToken,
       user: { id: user.id, name: user.name, email: user.email },
     });
   } catch (ex) {
@@ -177,15 +199,13 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, name: user.name },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = signAccessToken(user);
+    const refreshToken = signRefreshToken(user);
 
     res.json({
       message: "Login successful!",
       token,
+      refreshToken,
       user: { id: user.id, name: user.name, email: user.email },
     });
   } catch (ex) {
@@ -213,11 +233,12 @@ app.post("/forgot-password", async (req, res) => {
 
     const user = result.rows[0];
     const otp = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit OTP
+    const hashedOtp = hashResetToken(otp);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // expires in 10 minutes
 
     await pool.query(
       "UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3",
-      [otp, expiresAt, email.toLowerCase()]
+      [hashedOtp, expiresAt, email.toLowerCase()]
     );
 
     await mailer.sendMail({
@@ -266,9 +287,10 @@ app.post("/reset-password", async (req, res) => {
       return res.status(400).json({ error: "Password must be at least 6 characters." });
     }
 
+    const hashedToken = hashResetToken(token);
     const result = await pool.query(
       "SELECT id FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()",
-      [token]
+      [hashedToken]
     );
 
     if (result.rowCount === 0) {
@@ -278,7 +300,7 @@ app.post("/reset-password", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     await pool.query(
       "UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE reset_token = $2",
-      [hashedPassword, token]
+      [hashedPassword, hashedToken]
     );
 
     res.json({ message: "Password reset successful! You can now sign in with your new password." });
